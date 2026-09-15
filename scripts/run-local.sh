@@ -8,7 +8,7 @@ export SEED_DEMO="${SEED_DEMO:-true}"
 pids=()
 cleanup() { trap - EXIT INT TERM; for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done; wait || true; }
 trap cleanup EXIT INT TERM
-for service in inventory; do
+for service in inventory gateway; do
  ./bin/"$service" &
  pids+=("$!")
 done

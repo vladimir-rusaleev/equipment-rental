@@ -1,5 +1,5 @@
 GO ?= go
-SERVICES = inventory
+SERVICES = gateway inventory
 .PHONY: build test run run-memory generate
 build:
 	@mkdir -p bin
