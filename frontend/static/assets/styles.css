@@ -62,6 +62,7 @@ input[type=date] { min-width: 0; }
 .section-line b { color: #33383b; }
 .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .card { display: grid; grid-template-columns: 165px minmax(0, 1fr); border: 1px solid var(--line); background: #fff; }
+.card:hover { border-color: #b5b9bc; }
 .product-visual { min-height: 180px; background: #f0f1f1; display: flex; justify-content: center; align-items: center; padding: 20px; }
 .product-visual svg { width: 150px; height: 130px; max-width: 100%; }
 .product-visual img { max-width: 100%; max-height: 165px; object-fit: contain; }

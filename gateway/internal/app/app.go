@@ -17,13 +17,18 @@ func Run(ctx context.Context) error {
 	if len(platform.Env("SERVICE_KEY", "")) < 16 {
 		return errors.New("SERVICE_KEY must contain at least 16 characters")
 	}
+	rc, err := platform.Dial(platform.Env("RENTAL_ADDR", "localhost:50051"))
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
 	ic, err := platform.Dial(platform.Env("INVENTORY_ADDR", "localhost:50052"))
 	if err != nil {
 		return err
 	}
 	defer ic.Close()
 	mux := http.NewServeMux()
-	api := httpapi.New(adapter.New(pb.NewInventoryClient(ic)))
+	api := httpapi.New(adapter.New(pb.NewRentalClient(rc), pb.NewInventoryClient(ic)))
 	mux.Handle("/api/", api)
 	mux.Handle("/healthz", api)
 	mux.Handle("/", frontend.Handler())
