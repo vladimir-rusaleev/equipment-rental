@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+storage_override="${STORAGE:-}"
 if [[ -f .env ]]; then set -a; source .env; set +a; fi
+if [[ -n "$storage_override" ]]; then export STORAGE="$storage_override"; fi
 : "${SERVICE_KEY:?copy .env.example to .env and configure SERVICE_KEY}"
 : "${ADMIN_EMAIL:?configure ADMIN_EMAIL}"
 : "${ADMIN_PASSWORD:?configure ADMIN_PASSWORD}"

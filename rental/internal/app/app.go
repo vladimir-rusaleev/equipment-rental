@@ -5,10 +5,13 @@ import (
 	"sync"
 
 	"rent/internal/platform"
+	database "rent/internal/postgres"
 	pb "rent/pkg/generated"
 	inventory "rent/rental/internal/adapter/inventory/grpc"
 	notifier "rent/rental/internal/adapter/notifier/grpc"
 	controller "rent/rental/internal/controller/rental"
+	"rent/rental/internal/entity"
+	postgresrepository "rent/rental/internal/repository/postgres"
 	repository "rent/rental/internal/repository/rental"
 	cartusecase "rent/rental/internal/usecase/cart"
 	orderusecase "rent/rental/internal/usecase/order"
@@ -30,7 +33,23 @@ func Run(ctx context.Context) error {
 		return err
 	}
 	defer notifierConn.Close()
-	repo := repository.NewMemory()
+	storage, err := database.Storage()
+	if err != nil {
+		return err
+	}
+	var repo rentalRepository = repository.NewMemory()
+	if storage == "postgres" {
+		dsn, err := database.DSN("RENTAL_DATABASE_URL", "rent_rental")
+		if err != nil {
+			return err
+		}
+		persistent, err := postgresrepository.New(ctx, dsn)
+		if err != nil {
+			return err
+		}
+		defer persistent.Close()
+		repo = persistent
+	}
 	users := userusecase.New(repo)
 	carts := cartusecase.New(repo, users)
 	orders := orderusecase.New(repo, repo, users, inventory.New(inventoryConn))
@@ -50,4 +69,23 @@ func Run(ctx context.Context) error {
 	cancel()
 	workers.Wait()
 	return err
+}
+
+type rentalRepository interface {
+	EnsureAdmin(context.Context, string, string) error
+	CreateUser(context.Context, entity.User) (entity.User, error)
+	UserByEmail(context.Context, string) (entity.User, error)
+	User(context.Context, string) (entity.User, error)
+	SetRole(context.Context, string, string) (entity.User, error)
+	PutSession(context.Context, string, string) error
+	SessionUser(context.Context, string) (entity.User, error)
+	GetCart(context.Context, string) (entity.Cart, error)
+	SetCart(context.Context, string, []entity.Item) (entity.Cart, error)
+	FindRequest(context.Context, string, string) (entity.Order, error)
+	CreateOrder(context.Context, entity.Order) error
+	GetOrder(context.Context, string) (entity.Order, error)
+	SaveOrder(context.Context, entity.Order, *entity.Notification, bool) error
+	ListOrders(context.Context) ([]entity.Order, error)
+	Notifications(context.Context) ([]entity.Notification, error)
+	AckNotification(context.Context, string) error
 }

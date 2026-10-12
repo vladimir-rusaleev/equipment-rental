@@ -3,6 +3,7 @@ module rent
 go 1.27.1
 
 require (
+	github.com/lib/pq v1.10.9
 	golang.org/x/crypto v0.57.0
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12

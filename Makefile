@@ -1,6 +1,6 @@
 GO ?= go
 SERVICES = gateway rental inventory notifier
-.PHONY: build test run run-memory smoke generate
+.PHONY: build test run generate
 build:
 	@mkdir -p bin
 	@for service in $(SERVICES); do $(GO) build -buildvcs=false -o bin/$$service ./$$service/cmd/app || exit 1; done
@@ -14,4 +14,17 @@ run: build
 smoke: build
 	python3 scripts/smoke.py
 
-run-memory: run
+.PHONY: db-up up down run-memory
+
+db-up:
+	docker compose up -d --wait postgres
+
+up:
+	docker compose up --build
+
+down:
+	docker compose down
+
+run-memory: build
+	STORAGE=memory ./scripts/run-local.sh
+
