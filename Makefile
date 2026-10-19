@@ -14,7 +14,7 @@ run: build
 smoke: build
 	python3 scripts/smoke.py
 
-.PHONY: db-up up down run-memory
+.PHONY: db-up up down run-memory test-postgres
 
 db-up:
 	docker compose up -d --wait postgres
@@ -28,3 +28,5 @@ down:
 run-memory: build
 	STORAGE=memory ./scripts/run-local.sh
 
+test-postgres: build
+	GO="$(GO)" ./scripts/test-postgres.sh
