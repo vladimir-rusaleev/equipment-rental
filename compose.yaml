@@ -1,0 +1,74 @@
+services:
+  postgres:
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_USER: rent_owner
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init-db.sh:/docker-entrypoint-initdb.d/10-services.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U rent_owner -d postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+  gateway:
+    build:
+      context: .
+      args: {SERVICE: gateway}
+    ports: ["127.0.0.1:8080:8080"]
+    environment:
+      SERVICE_KEY: ${SERVICE_KEY:?set SERVICE_KEY in .env}
+      RENTAL_ADDR: rental:50051
+      INVENTORY_ADDR: inventory:50052
+    depends_on: [rental, inventory]
+  rental:
+    build:
+      context: .
+      args: {SERVICE: rental}
+    environment:
+      SERVICE_KEY: ${SERVICE_KEY}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?set ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD}
+      STORAGE: postgres
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      INVENTORY_ADDR: inventory:50052
+      NOTIFIER_ADDR: notifier:50053
+    depends_on:
+      postgres: {condition: service_healthy}
+      inventory: {condition: service_started}
+      notifier: {condition: service_started}
+  inventory:
+    build:
+      context: .
+      args: {SERVICE: inventory}
+    environment:
+      SERVICE_KEY: ${SERVICE_KEY}
+      STORAGE: postgres
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      SEED_DEMO: ${SEED_DEMO:-true}
+    depends_on:
+      postgres: {condition: service_healthy}
+  notifier:
+    build:
+      context: .
+      args: {SERVICE: notifier}
+    environment:
+      SERVICE_KEY: ${SERVICE_KEY}
+      STORAGE: postgres
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+    depends_on:
+      postgres: {condition: service_healthy}
+volumes:
+  postgres-data:

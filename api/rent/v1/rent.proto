@@ -1,0 +1,61 @@
+syntax = "proto3";
+package rent.v1;
+option go_package = "rent/pkg/generated;pb";
+message Empty {}
+message Model { string id=1; string name=2; string category=3; string description=4; int64 daily_price=5; int32 available=6; repeated string image_urls=7; }
+message Units { repeated Unit items=1; }
+message Unit { string id=1; string model_id=2; string state=3; }
+message ListRequest { string query=1; string category=2; string start=3; string end=4; }
+message Models { repeated Model items=1; }
+message ID { string id=1; }
+message Period { string start=1; string end=2; }
+message AvailabilityRequest { string model_id=1; string start=2; string end=3; }
+message Day { string date=1; int32 available=2; }
+message Calendar { repeated Day days=1; }
+message Item { string model_id=1; int32 quantity=2; string start=3; string end=4; }
+message Quote { Item item=1; string name=2; int64 daily_price=3; int64 total=4; repeated string unit_ids=5; repeated string returned_unit_ids=6; }
+message ReserveRequest { string order_id=1; repeated Item items=2; }
+message Reservation { string order_id=1; string state=2; repeated Quote items=3; }
+message ReturnRequest { string order_id=1; repeated string unit_ids=2; }
+service Inventory {
+ rpc List(ListRequest) returns(Models);
+ rpc Get(ID) returns(Model);
+ rpc CalendarFor(AvailabilityRequest) returns(Calendar);
+ rpc AddModel(Model) returns(Model);
+ rpc UpdateModel(Model) returns(Model);
+ rpc ListUnits(ID) returns(Units);
+ rpc AddUnit(Unit) returns(Unit);
+ rpc SetUnitState(Unit) returns(Unit);
+ rpc Reserve(ReserveRequest) returns(Reservation);
+ rpc GetReservation(ID) returns(Reservation);
+ rpc Cancel(ID) returns(Reservation);
+ rpc Issue(ID) returns(Reservation);
+ rpc Return(ReturnRequest) returns(Reservation);
+}
+message Credentials { string email=1; string password=2; }
+message User { string id=1; string email=2; string role=3; }
+message Session { string token=1; User user=2; }
+message Token { string token=1; }
+message RoleRequest { string user_id=1; string role=2; }
+message Cart { repeated Item items=1; }
+message OrderRequest { string request_id=1; }
+message Order { string id=1; string user_id=2; string state=3; repeated Quote items=4; int64 total=5; repeated Event history=6; string error=7; }
+message Event { string action=1; string actor_id=2; string reason=3; string occurred_at=4; }
+message Orders { repeated Order items=1; }
+message Action { string order_id=1; string reason=2; repeated string unit_ids=3; }
+service Rental {
+ rpc Register(Credentials) returns(Session);
+ rpc Login(Credentials) returns(Session);
+ rpc Authenticate(Token) returns(User);
+ rpc SetRole(RoleRequest) returns(User);
+ rpc GetCart(Empty) returns(Cart);
+ rpc SetCart(Cart) returns(Cart);
+ rpc Checkout(OrderRequest) returns(Order);
+ rpc GetOrder(ID) returns(Order);
+ rpc ListOrders(Empty) returns(Orders);
+ rpc Cancel(Action) returns(Order);
+ rpc Issue(Action) returns(Order);
+ rpc Return(Action) returns(Order);
+}
+message Notification { string id=1; string user_id=2; string order_id=3; string state=4; }
+service Notifier { rpc Notify(Notification) returns(Empty); }
