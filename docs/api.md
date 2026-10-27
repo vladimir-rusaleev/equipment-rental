@@ -1,7 +1,5 @@
 # HTTP API
 
-## HTTP API
-
 JSON использует `snake_case`. По правилам ProtoJSON поля `int64` выводятся строками;
 при вводе допустимы строковые и числовые значения.
 Защищённые маршруты требуют `Authorization: Bearer <token>`.
@@ -86,4 +84,3 @@ go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2.0
 # Добавьте $(go env GOPATH)/bin в PATH.
 make generate
 ```
-

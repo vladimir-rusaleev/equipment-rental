@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"time"
 
+	"rent/internal/metrics"
 	"rent/internal/platform"
 	pb "rent/pkg/generated"
 
@@ -35,11 +36,12 @@ func New(backend backend) http.Handler {
 	for _, route := range routes {
 		mux.HandleFunc(route, c.handle)
 	}
+	measured := metrics.HTTP(mux)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 		defer cancel()
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		mux.ServeHTTP(w, r.WithContext(platform.InternalContext(ctx)))
+		measured.ServeHTTP(w, r.WithContext(platform.InternalContext(ctx)))
 	})
 }
 

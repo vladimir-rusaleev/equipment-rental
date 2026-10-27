@@ -30,3 +30,12 @@ run-memory: build
 
 test-postgres: build
 	GO="$(GO)" ./scripts/test-postgres.sh
+
+.PHONY: infra-up
+infra-up:
+	docker compose up -d --wait postgres kafka
+	docker compose run --rm kafka-init
+
+.PHONY: smoke-kafka
+smoke-kafka: build
+	./scripts/smoke-kafka.sh

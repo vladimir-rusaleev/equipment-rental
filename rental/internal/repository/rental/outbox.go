@@ -22,3 +22,9 @@ func (m *memory) AckNotification(_ context.Context, id string) error {
 	delete(m.outbox, id)
 	return nil
 }
+
+func (m *memory) PendingCount(_ context.Context) (int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.outbox), nil
+}

@@ -5,23 +5,25 @@ import (
 	"log/slog"
 	"time"
 
+	"rent/internal/metrics"
 	"rent/rental/internal/entity"
 )
 
 type outboxRepository interface {
+	PendingCount(context.Context) (int, error)
 	Notifications(context.Context) ([]entity.Notification, error)
 	AckNotification(context.Context, string) error
 }
-type notifierClient interface {
+type eventPublisher interface {
 	Notify(context.Context, entity.Notification) error
 }
 type worker struct {
-	outbox   outboxRepository
-	notifier notifierClient
+	outbox    outboxRepository
+	publisher eventPublisher
 }
 
-func New(outbox outboxRepository, notifier notifierClient) *worker {
-	return &worker{outbox: outbox, notifier: notifier}
+func New(outbox outboxRepository, publisher eventPublisher) *worker {
+	return &worker{outbox: outbox, publisher: publisher}
 }
 
 func (w *worker) Run(ctx context.Context) {
@@ -40,18 +42,27 @@ func (w *worker) Run(ctx context.Context) {
 }
 
 func (w *worker) deliver(ctx context.Context) error {
+	defer func() {
+		if count, err := w.outbox.PendingCount(ctx); err == nil {
+			metrics.SetQueueDepth("outbox", count)
+		}
+	}()
+
 	events, err := w.outbox.Notifications(ctx)
 	if err != nil {
 		return err
 	}
 	for _, event := range events {
 		sendCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		err = w.notifier.Notify(sendCtx, event)
+		err = w.publisher.Notify(sendCtx, event)
 		cancel()
 		if err != nil {
-			continue
+			metrics.NotificationAttempt("outbox", err)
+			return err
 		}
-		if err = w.outbox.AckNotification(ctx, event.ID); err != nil {
+		err = w.outbox.AckNotification(ctx, event.ID)
+		metrics.NotificationAttempt("outbox", err)
+		if err != nil {
 			return err
 		}
 	}

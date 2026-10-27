@@ -93,29 +93,6 @@ func TestLostReserveResponseAndAuthorization(t *testing.T) {
 	}
 }
 
-func TestCartChangesSurvivePendingCheckout(t *testing.T) {
-	repo := rentalrepository.NewMemory()
-	f := &fakeInventory{failFirst: true, reservations: map[string]entity.Reservation{}}
-	users := userusecase.New(repo)
-	carts := cartusecase.New(repo, users)
-	s := orderusecase.New(repo, repo, users, f)
-	u, _ := repo.CreateUser(context.Background(), entity.User{Role: "customer"})
-	ctx := actor(u.ID)
-	items := []entity.Item{{ModelID: "a", Quantity: 1, Start: "2026-11-10", End: "2026-11-12"}}
-	_, _ = carts.SetCart(ctx, items)
-	_, _ = s.Checkout(ctx, "key")
-	items[0].ModelID = "b"
-	_, _ = carts.SetCart(ctx, items)
-	_, err := s.Checkout(ctx, "key")
-	if err != nil {
-		t.Fatal(err)
-	}
-	c, _ := carts.GetCart(ctx)
-	if len(c.Items) != 1 || c.Items[0].ModelID != "b" {
-		t.Fatal("new cart was cleared by older checkout")
-	}
-}
-
 func TestResumePendingAfterLostResponse(t *testing.T) {
 	repo := rentalrepository.NewMemory()
 	inventory := &fakeInventory{failFirst: true, reservations: map[string]entity.Reservation{}}

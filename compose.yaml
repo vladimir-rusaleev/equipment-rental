@@ -17,6 +17,47 @@ services:
       timeout: 3s
       retries: 30
     restart: unless-stopped
+  kafka:
+    image: apache/kafka:3.9.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: BROKER://:9092,HOST://:19092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: BROKER://kafka:9092,HOST://127.0.0.1:${KAFKA_PORT:-19092}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: BROKER:PLAINTEXT,HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: BROKER
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      CLUSTER_ID: 4L6g3nShT-eMCtK--X86sw
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_LOG_RETENTION_BYTES: 268435456
+      KAFKA_LOG_SEGMENT_BYTES: 16777216
+      KAFKA_HEAP_OPTS: -Xms128m -Xmx256m
+    ports:
+      - "127.0.0.1:${KAFKA_PORT:-19092}:19092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "KAFKA_HEAP_OPTS='-Xms16m -Xmx128m' /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      start_period: 20s
+      retries: 20
+  kafka-init:
+    image: apache/kafka:3.9.1
+    environment:
+      KAFKA_TOPIC: ${KAFKA_TOPIC:-rental.orders}
+      KAFKA_HEAP_OPTS: -Xms16m -Xmx128m
+    entrypoint: ["/bin/bash", "-ec"]
+    command:
+      - /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_TOPIC}" --partitions 1 --replication-factor 1
+    depends_on:
+      kafka: {condition: service_healthy}
   gateway:
     build:
       context: .
@@ -35,22 +76,26 @@ services:
       SERVICE_KEY: ${SERVICE_KEY}
       ADMIN_EMAIL: ${ADMIN_EMAIL:?set ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD}
+      METRICS_LISTEN: ":9091"
       STORAGE: postgres
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       APP_DB_PASSWORD: ${APP_DB_PASSWORD}
       INVENTORY_ADDR: inventory:50052
-      NOTIFIER_ADDR: notifier:50053
+      NOTIFICATION_TRANSPORT: kafka
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC: ${KAFKA_TOPIC:-rental.orders}
     depends_on:
       postgres: {condition: service_healthy}
       inventory: {condition: service_started}
-      notifier: {condition: service_started}
+      kafka-init: {condition: service_completed_successfully}
   inventory:
     build:
       context: .
       args: {SERVICE: inventory}
     environment:
       SERVICE_KEY: ${SERVICE_KEY}
+      METRICS_LISTEN: ":9091"
       STORAGE: postgres
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
@@ -64,11 +109,47 @@ services:
       args: {SERVICE: notifier}
     environment:
       SERVICE_KEY: ${SERVICE_KEY}
+      METRICS_LISTEN: ":9091"
+      NOTIFICATION_TRANSPORT: kafka
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC: ${KAFKA_TOPIC:-rental.orders}
+      KAFKA_GROUP: rent-notifier
       STORAGE: postgres
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       APP_DB_PASSWORD: ${APP_DB_PASSWORD}
     depends_on:
       postgres: {condition: service_healthy}
+      kafka-init: {condition: service_completed_successfully}
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on: [gateway, rental, inventory, notifier]
+  grafana:
+    image: grafana/grafana:12.1.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/rent.json
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on: [prometheus]
+
 volumes:
   postgres-data:
+  prometheus-data:
+  grafana-data:
+  kafka-data:

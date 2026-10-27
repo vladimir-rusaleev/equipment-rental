@@ -4,11 +4,13 @@ import (
 	"context"
 	"time"
 
+	"rent/internal/metrics"
 	"rent/internal/platform"
 	"rent/notifier/internal/entity"
 )
 
 type repository interface {
+	PendingCount(context.Context) (int, error)
 	Put(context.Context, entity.Notification) error
 	Pending(context.Context) ([]entity.Notification, error)
 	Sent(context.Context, string) error
@@ -47,8 +49,12 @@ func (s *service) RunWorker(ctx context.Context) {
 				err = s.sender.Send(c, n)
 				cancel()
 				if err == nil {
-					_ = s.repo.Sent(ctx, n.ID)
+					err = s.repo.Sent(ctx, n.ID)
 				}
+				metrics.NotificationAttempt("delivery", err)
+			}
+			if count, err := s.repo.PendingCount(ctx); err == nil {
+				metrics.SetQueueDepth("notifications", count)
 			}
 		}
 	}

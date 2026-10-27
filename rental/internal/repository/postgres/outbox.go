@@ -25,3 +25,9 @@ func (r *repository) AckNotification(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, "DELETE FROM outbox WHERE id=$1", id)
 	return err
 }
+
+func (r *repository) PendingCount(ctx context.Context) (int, error) {
+	var count int
+	err := r.db.QueryRowContext(ctx, "SELECT count(*) FROM outbox").Scan(&count)
+	return count, err
+}

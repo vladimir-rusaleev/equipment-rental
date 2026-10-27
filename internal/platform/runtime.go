@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"rent/internal/metrics"
 	"syscall"
 	"time"
 
@@ -81,7 +82,13 @@ func Serve(ctx context.Context, addr string, register func(*grpc.Server)) error 
 	if err != nil {
 		return err
 	}
-	s := grpc.NewServer(grpc.UnaryInterceptor(func(ctx context.Context, req any, info *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
+	stopMetrics, err := metrics.Start(ctx, os.Getenv("METRICS_LISTEN"))
+	if err != nil {
+		l.Close()
+		return err
+	}
+	defer stopMetrics()
+	s := grpc.NewServer(grpc.ChainUnaryInterceptor(metrics.GRPC, func(ctx context.Context, req any, info *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
 		m, _ := metadata.FromIncomingContext(ctx)
 		v := m.Get("x-service-key")
 		if len(v) != 1 || subtle.ConstantTimeCompare([]byte(v[0]), []byte(key)) != 1 {

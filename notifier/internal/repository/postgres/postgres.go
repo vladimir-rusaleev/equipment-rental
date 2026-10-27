@@ -58,3 +58,9 @@ func (r *repository) Sent(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx, "UPDATE notifications SET sent=true,sent_at=now() WHERE id=$1", id)
 	return database.Changed(result, err)
 }
+
+func (r *repository) PendingCount(ctx context.Context) (int, error) {
+	var count int
+	err := r.db.QueryRowContext(ctx, "SELECT count(*) FROM notifications WHERE NOT sent").Scan(&count)
+	return count, err
+}

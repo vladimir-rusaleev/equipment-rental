@@ -9,6 +9,7 @@ import (
 	"rent/frontend"
 	"rent/gateway/internal/adapter"
 	"rent/gateway/internal/controller/httpapi"
+	"rent/internal/metrics"
 	"rent/internal/platform"
 	pb "rent/pkg/generated"
 )
@@ -31,6 +32,7 @@ func Run(ctx context.Context) error {
 	api := httpapi.New(adapter.New(pb.NewRentalClient(rc), pb.NewInventoryClient(ic)))
 	mux.Handle("/api/", api)
 	mux.Handle("/healthz", api)
+	mux.Handle("GET /metrics", metrics.Handler())
 	mux.Handle("/", frontend.Handler())
 	s := &http.Server{Addr: platform.Env("GATEWAY_LISTEN", ":8080"), Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
 	done := make(chan struct{})
