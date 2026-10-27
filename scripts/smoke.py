@@ -21,13 +21,20 @@ def free_port():
 
 ports = {name: free_port() for name in ('gateway', 'rental', 'inventory', 'notifier')}
 base = f'http://127.0.0.1:{ports["gateway"]}/api/v1'
+metrics_ports = {name: free_port() for name in ('rental', 'inventory', 'notifier')}
 env = dict(os.environ, SERVICE_KEY='smoke-test-internal-service-key',
            ADMIN_EMAIL='admin@example.com', ADMIN_PASSWORD='test-admin-password',
+           NOTIFICATION_TRANSPORT=os.environ.get('RENT_TEST_TRANSPORT','grpc'),
            STORAGE=os.environ.get('RENT_TEST_STORAGE','memory'), SEED_DEMO='true', GATEWAY_LISTEN=f'127.0.0.1:{ports["gateway"]}')
 for name in ('rental', 'inventory', 'notifier'):
     addr = f'127.0.0.1:{ports[name]}'
     env[name.upper() + '_LISTEN'] = addr
     env[name.upper() + '_ADDR'] = addr
+
+def service_env(name):
+    values = dict(env)
+    values['METRICS_LISTEN'] = f'127.0.0.1:{metrics_ports[name]}' if name in metrics_ports else ''
+    return values
 
 def request(method, path, payload=None, token=None, expected=200):
     headers = {'Content-Type': 'application/json'}
@@ -48,7 +55,7 @@ processes = []
 with tempfile.TemporaryFile(mode='w+') as log:
     try:
         for name in ('inventory', 'notifier', 'rental', 'gateway'):
-            processes.append(subprocess.Popen([str(ROOT / 'bin' / name)], env=env,
+            processes.append(subprocess.Popen([str(ROOT / 'bin' / name)], env=service_env(name),
                                               stdout=log, stderr=log))
         for _ in range(100):
             try:
@@ -94,11 +101,24 @@ with tempfile.TemporaryFile(mode='w+') as log:
                     return response.status, json.load(response)
             except urllib.error.HTTPError as e:
                 return e.code, json.load(e)
+        if env['NOTIFICATION_TRANSPORT'] == 'kafka':
+            processes[1].terminate()
+            processes[1].wait(timeout=10)
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             outcomes = list(pool.map(checkout, users))
         assert sorted(code for code, _ in outcomes) == [200, 409], outcomes
         index = next(i for i, (code, _) in enumerate(outcomes) if code == 200)
         order = outcomes[index][1]
+        if env['NOTIFICATION_TRANSPORT'] == 'kafka':
+            processes[1] = subprocess.Popen([str(ROOT / 'bin' / 'notifier')], env=service_env('notifier'), stdout=log, stderr=log)
+            for _ in range(300):
+                output = os.pread(log.fileno(), 1 << 20, 0).decode(errors='replace')
+                if 'order_id=' + order['id'] in output:
+                    break
+                time.sleep(.1)
+            else:
+                raise AssertionError('Kafka did not deliver the order created while Notifier was stopped')
+            print('PASS: Kafka delivers queued events after Notifier restart')
         owner = users[index]['token']
         other = users[1-index]['token']
 
@@ -110,7 +130,7 @@ with tempfile.TemporaryFile(mode='w+') as log:
                 process.wait(timeout=10)
             processes.clear()
             for name in ('inventory', 'notifier', 'rental', 'gateway'):
-                processes.append(subprocess.Popen([str(ROOT / 'bin' / name)], env=env,
+                processes.append(subprocess.Popen([str(ROOT / 'bin' / name)], env=service_env(name),
                                                   stdout=log, stderr=log))
             for _ in range(100):
                 try:
@@ -142,7 +162,6 @@ with tempfile.TemporaryFile(mode='w+') as log:
         complete = request('POST', '/orders/' + order['id'] + '/return', {'unit_ids': unit_ids[1:]}, admin)
         assert complete['state'] == 'completed'
         request('POST', '/orders/' + order['id'] + '/return', {'unit_ids': unit_ids}, admin)
-        # Different periods per cart position.
         request('PUT', '/cart', {'items': [
             {'model_id': model['id'], 'quantity': 1, 'start': end, 'end': later},
             {'model_id': models[1]['id'], 'quantity': 1, 'start': start, 'end': later}]}, owner)
@@ -162,8 +181,8 @@ with tempfile.TemporaryFile(mode='w+') as log:
             assert pending['state'] == 'pending', pending
             processes[2].terminate()
             processes[2].wait(timeout=10)
-            processes[2] = subprocess.Popen([str(ROOT / 'bin' / 'rental')], env=env, stdout=log, stderr=log)
-            processes[0] = subprocess.Popen([str(ROOT / 'bin' / 'inventory')], env=env, stdout=log, stderr=log)
+            processes[2] = subprocess.Popen([str(ROOT / 'bin' / 'rental')], env=service_env('rental'), stdout=log, stderr=log)
+            processes[0] = subprocess.Popen([str(ROOT / 'bin' / 'inventory')], env=service_env('inventory'), stdout=log, stderr=log)
             for _ in range(100):
                 try:
                     recovered = request('GET', '/orders/' + pending['id'], token=owner)
@@ -177,7 +196,6 @@ with tempfile.TemporaryFile(mode='w+') as log:
             request('POST', '/orders/' + pending['id'] + '/cancel', {}, owner)
             print('PASS: pending checkout resumes from PostgreSQL after Rental/Inventory restart')
 
-        # Staff and administrator responsibilities.
         staff_id = users[index]['user']['id']
         request('PATCH', '/users/' + staff_id + '/role', {'role': 'staff'}, admin)
         request('POST', '/models', {'name': 'Test drill', 'category': 'drills', 'daily_price': '50000'}, owner, 403)
@@ -192,6 +210,28 @@ with tempfile.TemporaryFile(mode='w+') as log:
         request('PATCH', '/units/' + unit['id'], {'state': 'maintenance'}, owner)
         filtered = request('GET', '/models?category=drills&query=Test')['items']
         assert len(filtered) == 1
+        with urllib.request.urlopen(base.removesuffix('/api/v1') + '/metrics') as response:
+            metrics = response.read().decode()
+            assert response.status == 200
+            assert 'rent_http_requests_total{' in metrics
+            assert 'route="GET /api/v1/models"' in metrics
+            assert 'code="403"' in metrics
+            assert 'rent_http_request_duration_seconds_bucket{' in metrics
+            assert model['id'] not in metrics, 'model ID leaked into metric labels'
+
+        for service, port in metrics_ports.items():
+            for attempt in range(30):
+                with urllib.request.urlopen(f'http://127.0.0.1:{port}/metrics') as response:
+                    metrics = response.read().decode()
+                has_requests = 'rent_grpc_requests_total{' in metrics
+                if service == 'notifier' and env['NOTIFICATION_TRANSPORT'] == 'kafka':
+                    has_requests = 'stage="kafka_consume"' in metrics
+                if has_requests and (service == 'inventory' or 'rent_queue_pending{' in metrics):
+                    break
+                time.sleep(.1)
+            else:
+                raise AssertionError(f'{service} metrics missing')
+        print('PASS: Gateway HTTP metrics and gRPC/queue metrics for all business services')
         print('PASS: four services, auth/RBAC, catalogue/calendar, concurrent atomic booking,')
         print('idempotent checkout, different dates, partial return, cancellation and staff actions')
     except BaseException:

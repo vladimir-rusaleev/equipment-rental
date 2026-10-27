@@ -4,11 +4,13 @@ import (
 	"context"
 	"sync"
 
+	"rent/internal/eventbus"
 	"rent/internal/platform"
 	database "rent/internal/postgres"
 	pb "rent/pkg/generated"
 	inventory "rent/rental/internal/adapter/inventory/grpc"
 	notifier "rent/rental/internal/adapter/notifier/grpc"
+	kafkanotifier "rent/rental/internal/adapter/notifier/kafka"
 	controller "rent/rental/internal/controller/rental"
 	"rent/rental/internal/entity"
 	postgresrepository "rent/rental/internal/repository/postgres"
@@ -28,11 +30,24 @@ func Run(ctx context.Context) error {
 		return err
 	}
 	defer inventoryConn.Close()
-	notifierConn, err := platform.Dial(platform.Env("NOTIFIER_ADDR", "localhost:50053"))
+
+	config, err := eventbus.Load()
 	if err != nil {
 		return err
 	}
-	defer notifierConn.Close()
+	var notifications notificationPublisher
+	if config.Transport == "kafka" {
+		publisher := kafkanotifier.New(config)
+		defer publisher.Close()
+		notifications = publisher
+	} else {
+		conn, err := platform.Dial(platform.Env("NOTIFIER_ADDR", "localhost:50053"))
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+		notifications = notifier.New(conn)
+	}
 	storage, err := database.Storage()
 	if err != nil {
 		return err
@@ -63,7 +78,7 @@ func Run(ctx context.Context) error {
 	go func() { defer workers.Done(); orderworker.New(orders).Run(workerCtx) }()
 	go func() {
 		defer workers.Done()
-		notificationworker.New(repo, notifier.New(notifierConn)).Run(workerCtx)
+		notificationworker.New(repo, notifications).Run(workerCtx)
 	}()
 	err = platform.Serve(ctx, platform.Env("RENTAL_LISTEN", ":50051"), func(server *grpc.Server) { pb.RegisterRentalServer(server, controller.New(users, carts, orders)) })
 	cancel()
@@ -72,6 +87,7 @@ func Run(ctx context.Context) error {
 }
 
 type rentalRepository interface {
+	PendingCount(context.Context) (int, error)
 	EnsureAdmin(context.Context, string, string) error
 	CreateUser(context.Context, entity.User) (entity.User, error)
 	UserByEmail(context.Context, string) (entity.User, error)
@@ -88,4 +104,8 @@ type rentalRepository interface {
 	ListOrders(context.Context) ([]entity.Order, error)
 	Notifications(context.Context) ([]entity.Notification, error)
 	AckNotification(context.Context, string) error
+}
+
+type notificationPublisher interface {
+	Notify(context.Context, entity.Notification) error
 }

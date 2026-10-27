@@ -28,8 +28,8 @@ func TestFailedDeliveryRemainsInOutbox(t *testing.T) {
 	}
 	notifier := &failingNotifier{}
 	worker := New(repo, notifier)
-	if err := worker.deliver(ctx); err != nil {
-		t.Fatal(err)
+	if err := worker.deliver(ctx); err == nil {
+		t.Fatal("failed publish was not reported")
 	}
 	events, err := repo.Notifications(ctx)
 	if err != nil || len(events) != 1 {

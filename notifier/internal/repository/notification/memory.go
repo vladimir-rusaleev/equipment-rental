@@ -52,3 +52,15 @@ func (m *memory) Sent(_ context.Context, id string) error {
 	m.records[id] = r
 	return nil
 }
+
+func (m *memory) PendingCount(_ context.Context) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count := 0
+	for _, record := range m.records {
+		if !record.Sent {
+			count++
+		}
+	}
+	return count, nil
+}

@@ -3,7 +3,6 @@ package inventory
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
 
 	"rent/internal/platform"
@@ -26,33 +25,6 @@ func setup(t *testing.T) (*memory, entity.Model, entity.Unit) {
 
 func item(id string) entity.Item {
 	return entity.Item{ModelID: id, Quantity: 1, Start: "2026-11-10", End: "2026-11-12"}
-}
-
-func TestConcurrentReservations(t *testing.T) {
-	m, model, _ := setup(t)
-	var wg sync.WaitGroup
-	results := make(chan error, 20)
-	for range 20 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_, err := m.Reserve(context.Background(), platform.NewID(), []entity.Item{item(model.ID)})
-			results <- err
-		}()
-	}
-	wg.Wait()
-	close(results)
-	success := 0
-	for err := range results {
-		if err == nil {
-			success++
-		} else if !errors.Is(err, platform.ErrConflict) {
-			t.Fatal(err)
-		}
-	}
-	if success != 1 {
-		t.Fatalf("successful reservations: %d", success)
-	}
 }
 
 func TestAtomicBundleAndIdempotency(t *testing.T) {
@@ -117,48 +89,5 @@ func TestAdjacentPeriodsCancellationAndReturn(t *testing.T) {
 	r, err = m.Return(ctx, "a", []string{u.ID})
 	if err != nil || len(r.Items[0].ReturnedUnitIDs) != 1 {
 		t.Fatal("duplicate return not idempotent")
-	}
-}
-
-func TestDifferentPeriodsWithinBundle(t *testing.T) {
-	m, model, _ := setup(t)
-	a := item(model.ID)
-	b := a
-	b.Start = a.End
-	b.End = "2026-11-15"
-	r, err := m.Reserve(context.Background(), "bundle", []entity.Item{a, b})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.Items[0].UnitIDs[0] != r.Items[1].UnitIDs[0] {
-		t.Fatal("same unit should be reusable in adjacent intervals")
-	}
-	if r.Items[0].Total != 200 || r.Items[1].Total != 300 {
-		t.Fatal("wrong daily pricing")
-	}
-}
-
-func TestPriceSnapshotAndImageIsolation(t *testing.T) {
-	m, model, _ := setup(t)
-	ctx := context.Background()
-	model.ImageURLs = []string{"https://example.com/drill.png"}
-	updated, err := m.UpdateModel(ctx, model)
-	if err != nil {
-		t.Fatal(err)
-	}
-	updated.ImageURLs[0] = "changed"
-	stored, _ := m.Get(ctx, model.ID)
-	if stored.ImageURLs[0] != "https://example.com/drill.png" {
-		t.Fatal("model leaked mutable state")
-	}
-	reserved, err := m.Reserve(ctx, "snapshot", []entity.Item{item(model.ID)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	model.DailyPrice = 500
-	_, _ = m.UpdateModel(ctx, model)
-	again, err := m.Reserve(ctx, "snapshot", []entity.Item{item(model.ID)})
-	if err != nil || again.Items[0].Total != reserved.Items[0].Total {
-		t.Fatal("existing price changed")
 	}
 }

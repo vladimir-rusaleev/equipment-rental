@@ -137,7 +137,6 @@ func (m *memory) Return(_ context.Context, id string, ids []string) (entity.Rese
 			return entity.Reservation{}, platform.ErrInvalid
 		}
 	}
-	// Build a copy before changing nested slices.
 	r = entity.Clone(r)
 	all := true
 	for i := range r.Items {

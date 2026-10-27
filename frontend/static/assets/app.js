@@ -9,7 +9,7 @@ const roleNames = {customer:'Клиент',staff:'Сотрудник',admin:'А�
 const stateNames = {ready:'Готов к выдаче',maintenance:'На обслуживании',retired:'Списан'};
 const actionNames = {reserve:'Бронирование',cancel:'Отмена',issue:'Выдача',return:'Возврат'};
 const read = (key, fallback) => {try {return JSON.parse(localStorage.getItem(key)) ?? fallback;} catch {return fallback;}};
-const write = (key,value) => {try {localStorage.setItem(key,JSON.stringify(value));} catch { /* The UI remains usable without persistent browser storage. */ }};
+const write = (key,value) => {try {localStorage.setItem(key,JSON.stringify(value));} catch {}};
 const state = {token:read('rent.session',''), user:null, models:[], cart:[], orders:[], view:'catalog', filters:{query:'',category:'',start:'',end:''}, staffTab:'orders', loading:false, checkoutKey:read('rent.checkout',''), modalItem:null};
 const staff = () => ['staff','admin'].includes(state.user?.role);
 const admin = () => state.user?.role === 'admin';
@@ -41,13 +41,13 @@ function visual(model) {
  return `<div class="product-visual">${url ? `<img src="${esc(url)}" alt="${esc(model.name)}" referrerpolicy="no-referrer">` : illustration(model.category)}</div>`;
 }
 function toast(message, error=false) {const el=document.createElement('div');el.className='toast'+(error?' error':'');el.textContent=message;$('#toasts').append(el);setTimeout(()=>el.remove(),6000);}
-const messages = {'invalid input':'Проверьте даты, количество и заполненные поля.','unauthenticated':'Проверьте почту и пароль или войдите заново.','forbidden':'Недостаточно прав для этого действия.','dependency unavailable':'Один из сервисов временно недоступен. Попробуйте позже.','operation not allowed':'Действие недоступно для текущего состояния.','conflict':'Данные изменились или операция конфликтует с существующими записями.','not found':'Запись не найдена. Возможно, сервер был перезапущен.','insufficient permissions':'Недостаточно прав для этого действия.'};
+const messages = {'invalid input':'Проверьте даты, количество и заполненные поля.','unauthenticated':'Проверьте почту и пароль или войдите заново.','forbidden':'Недостаточно прав для этого действия.','dependency unavailable':'Сервис временно недоступен. Попробуйте позже.','operation not allowed':'Действие недоступно для текущего состояния.','conflict':'Данные изменились или операция конфликтует с существующими записями.','not found':'Запись не найдена.','insufficient permissions':'Недостаточно прав для этого действия.'};
 async function api(path, {method='GET',body,auth=true}={}) {
  const headers={'Accept':'application/json'};
  if (body!==undefined) headers['Content-Type']='application/json';
  if (auth && state.token) headers.Authorization='Bearer '+state.token;
  let response;
- try {response=await fetch('/api/v1'+path,{method,headers,body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(12000)});} catch {throw new Error('Не удалось связаться с сервером. Проверьте, что make run запущен.');}
+ try {response=await fetch('/api/v1'+path,{method,headers,body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(12000)});} catch {throw new Error('Не удалось связаться с сервером. Попробуйте позже.');}
  let data;try {data=await response.json();} catch {throw new Error('Сервер вернул неожиданный ответ.');}
  if(!response.ok) {
   if(response.status===401 && auth && state.token){state.token='';state.user=null;write('rent.session','');navigation();}
@@ -249,6 +249,6 @@ document.addEventListener('change',async event=>{
 });
 modal.addEventListener('click',event=>{if(event.target===modal){const r=modal.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)modal.close();}});
 window.addEventListener('hashchange',()=>{if(state.view==='catalog'&&location.hash==='#catalog')state.filters={query:'',category:'',start:'',end:''};render();});
-setInterval(async()=>{if(!state.user||modal.open||!['orders','staff'].includes(state.view)||state.view==='staff'&&state.staffTab!=='orders')return;if(!state.orders.some(o=>['pending','cancelling','issuing','returning'].includes(o.state)))return;try{await loadOrders();renderOrders(state.view==='staff');}catch{ /* An explicit refresh surfaces connection errors. */ }},3000);
+setInterval(async()=>{if(!state.user||modal.open||!['orders','staff'].includes(state.view)||state.view==='staff'&&state.staffTab!=='orders')return;if(!state.orders.some(o=>['pending','cancelling','issuing','returning'].includes(o.state)))return;try{await loadOrders();renderOrders(state.view==='staff');}catch{}},3000);
 async function init(){state.cart=read('rent.guest-cart',[]);if(state.token){try{await refreshUser();state.cart=(await api('/cart')).items||[];}catch(e){toast(e.message,true);}}navigation();await render();}
 init();
